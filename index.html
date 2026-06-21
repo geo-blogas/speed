@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speed</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: radial-gradient(ellipse at 50% 40%, #060c10 0%, #000000 75%);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  .gauge-wrap {
+    position: relative;
+    width: min(92vmin, 540px);
+    height: min(92vmin, 540px);
+  }
+
+  /* два canvas — статика и динамика */
+  canvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+
+  #bgCanvas  { z-index: 1; }
+  #fgCanvas  { z-index: 2; }
+
+  .controls {
+    position: fixed;
+    bottom: 20px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; gap: 12px; align-items: center;
+  }
+
+  .gps-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.35);
+    color: #fff;
+    padding: 8px 24px;
+    border-radius: 20px;
+    font-size: 13px; letter-spacing: 1.5px;
+    cursor: pointer;
+    transition: all 0.25s;
+  }
+  .gps-btn:hover { background: rgba(255,255,255,0.07); border-color:#fff; }
+  .gps-btn.active {
+    background: rgba(255,59,48,0.14);
+    border-color: #ff3b30; color: #ff3b30;
+    box-shadow: 0 0 14px rgba(255,59,48,0.4);
+  }
+</style>
+</head>
+<body>
+
+<div class="gauge-wrap">
+  <canvas id="bgCanvas" width="600" height="600"></canvas>
+  <canvas id="fgCanvas" width="600" height="600"></canvas>
+</div>
+
+<div class="controls">
+  <button class="gps-btn" id="gpsBtn">⬤ GPS</button>
+</div>
+
+<script>
+// ─── константы ────────────────────────────────────────────────────────────────
+const MAX_SPEED   = 140;
+const ZONE_LIMIT  = 50;
+const START_ANGLE = Math.PI * 0.75;
+const END_ANGLE   = Math.PI * 2.25;
+const ANGLE_RANGE = END_ANGLE - START_ANGLE;
+
+// ─── canvas ───────────────────────────────────────────────────────────────────
+const bgCanvas = document.getElementById('bgCanvas');
+const bgCtx    = bgCanvas.getContext('2d');
+const fgCanvas = document.getElementById('fgCanvas');
+const fgCtx    = fgCanvas.getContext('2d');
+
+const W = bgCanvas.width, H = bgCanvas.height;
+const CX = W / 2, CY = H / 2;
+const R  = W * 0.42;
+
+// ─── физика стрелки ───────────────────────────────────────────────────────────
+let displayAngle  = speedToAngle(0);
+let velocity      = 0;
+let targetValue   = 0;
+let currentValue  = 0;   // только для цифры
+
+// ─── GPS / sweep ──────────────────────────────────────────────────────────────
+let watchId    = null;
+let gpsActive  = false;
+let sweepDone  = false;
+
+function speedToAngle(speed) {
+  return START_ANGLE + Math.min(Math.max(speed / MAX_SPEED, 0), 1) * ANGLE_RANGE;
+}
+function angleToSpeed(a) {
+  return Math.max(0, Math.min(MAX_SPEED, ((a - START_ANGLE) / ANGLE_RANGE) * MAX_SPEED));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ФОНОВЫЙ СЛОЙ — рисуется ОДИН раз (или при resize)
+// ═══════════════════════════════════════════════════════════════════════════════
+function drawBackground() {
+  const ctx = bgCtx;
+  ctx.clearRect(0, 0, W, H);
+
+  // ── фон диска ──
+  const bgG = ctx.createRadialGradient(CX, CY, R * 0.1, CX, CY, R * 1.1);
+  bgG.addColorStop(0,   '#0b1117');
+  bgG.addColorStop(0.7, '#060b0f');
+  bgG.addColorStop(1,   '#000000');
+  ctx.beginPath();
+  ctx.arc(CX, CY, R * 1.08, 0, Math.PI * 2);
+  ctx.fillStyle = bgG;
+  ctx.fill();
+
+  // ── внешний хром-обод (3 слоя) ──
+  [
+    { r: R * 1.08, lw: 8,  color: '#0e1e28' },
+    { r: R * 1.04, lw: 3,  color: '#1c3a4a' },
+    { r: R * 1.01, lw: 1.5,color: 'rgba(41,224,255,0.18)' }
+  ].forEach(o => {
+    ctx.beginPath();
+    ctx.arc(CX, CY, o.r, 0, Math.PI * 2);
+    ctx.strokeStyle = o.color; ctx.lineWidth = o.lw; ctx.stroke();
+  });
+
+  // ── виньет-тень по краю ──
+  const vgr = ctx.createRadialGradient(CX, CY, R * 0.6, CX, CY, R * 1.08);
+  vgr.addColorStop(0, 'rgba(0,0,0,0)');
+  vgr.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, R * 1.08, 0, Math.PI * 2);
+  ctx.fillStyle = vgr; ctx.fill();
+
+  // ── фоновая дуга шкалы ──
+  ctx.beginPath();
+  ctx.arc(CX, CY, R, START_ANGLE, END_ANGLE);
+  ctx.strokeStyle = 'rgba(41,224,255,0.08)';
+  ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
+
+  // ── зона 0–50 км/ч (зелёная дуга) ──
+  const zoneAngle = speedToAngle(ZONE_LIMIT);
+  ctx.save();
+  ctx.shadowColor = '#1de9b6'; ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.arc(CX, CY, R, START_ANGLE, zoneAngle);
+  ctx.strokeStyle = 'rgba(29,233,182,0.22)';
+  ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
+  ctx.restore();
+
+  // ── деления ──
+  const majorStep = 20, minorStep = 5;
+  for (let v = 0; v <= MAX_SPEED; v += minorStep) {
+    const angle   = speedToAngle(v);
+    const isMajor = v % majorStep === 0;
+    const innerR  = isMajor ? R - 26 : R - 16;
+    const outerR  = R - 4;
+
+    ctx.beginPath();
+    ctx.moveTo(CX + Math.cos(angle) * innerR, CY + Math.sin(angle) * innerR);
+    ctx.lineTo(CX + Math.cos(angle) * outerR, CY + Math.sin(angle) * outerR);
+
+    // цвет деления по зоне
+    let color;
+    if (v <= 50)       color = isMajor ? '#2de8b2' : 'rgba(45,232,178,0.45)';
+    else if (v <= 100) color = isMajor ? '#5fefff' : 'rgba(95,239,255,0.45)';
+    else               color = isMajor ? '#c8f0ff' : 'rgba(200,240,255,0.35)';
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = isMajor ? 3 : 1.5;
+    ctx.stroke();
+
+    if (isMajor) {
+      const textR = R - 50;
+      const tx = CX + Math.cos(angle) * textR;
+      const ty = CY + Math.sin(angle) * textR;
+
+      // цвет цифр по зоне
+      let fc;
+      if (v <= 50)       fc = '#2de8b2';
+      else if (v <= 100) fc = '#a8e8ff';
+      else               fc = '#ddf5ff';
+
+      ctx.fillStyle = fc;
+      ctx.font = '600 17px Segoe UI, Arial, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(v, tx, ty);
+    }
+  }
+
+  // ── блик стекла (верхняя полуокружность) ──
+  const glassG = ctx.createRadialGradient(CX, CY - R * 0.35, R * 0.1, CX, CY - R * 0.1, R * 0.9);
+  glassG.addColorStop(0,   'rgba(255,255,255,0.10)');
+  glassG.addColorStop(0.5, 'rgba(255,255,255,0.03)');
+  glassG.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, R * 1.0, 0, Math.PI * 2);
+  ctx.fillStyle = glassG; ctx.fill();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ПЕРЕДНИЙ СЛОЙ — каждый кадр
+// ═══════════════════════════════════════════════════════════════════════════════
+function drawForeground() {
+  const ctx = fgCtx;
+  ctx.clearRect(0, 0, W, H);
+
+  const curAngle = displayAngle;
+  const speed    = currentValue;
+
+  // ── активная (пройденная) дуга ──
+  ctx.save();
+  ctx.shadowColor = '#29e0ff'; ctx.shadowBlur = 22;
+  ctx.beginPath();
+  ctx.arc(CX, CY, R, START_ANGLE, curAngle);
+  const arcG = ctx.createLinearGradient(CX - R, CY, CX + R, CY);
+  arcG.addColorStop(0,   '#0c6e8a');
+  arcG.addColorStop(0.6, '#29e0ff');
+  arcG.addColorStop(1,   '#7df3ff');
+  ctx.strokeStyle = arcG;
+  ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
+  ctx.restore();
+
+  // ── яркие деления (пройденная зона) ──
+  const majorStep = 20, minorStep = 5;
+  for (let v = 0; v <= MAX_SPEED; v += minorStep) {
+    if (v > speed) break;
+    const angle   = speedToAngle(v);
+    const isMajor = v % majorStep === 0;
+    const innerR  = isMajor ? R - 26 : R - 16;
+    const outerR  = R - 4;
+
+    ctx.beginPath();
+    ctx.moveTo(CX + Math.cos(angle) * innerR, CY + Math.sin(angle) * innerR);
+    ctx.lineTo(CX + Math.cos(angle) * outerR, CY + Math.sin(angle) * outerR);
+
+    let color;
+    if (v <= 50)       color = isMajor ? '#2de8b2' : 'rgba(45,232,178,0.7)';
+    else if (v <= 100) color = isMajor ? '#5fefff' : 'rgba(95,239,255,0.7)';
+    else               color = isMajor ? '#ffffff' : 'rgba(255,255,255,0.5)';
+
+    ctx.save();
+    if (isMajor) { ctx.shadowColor = color; ctx.shadowBlur = 6; }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = isMajor ? 3.5 : 1.8;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── стрелка ──
+  drawNeedle(ctx, curAngle);
+
+  // ── центральный узел ──
+  drawHub(ctx);
+
+  // ── цифровое значение + метка ──
+  const dispSpeed = Math.round(speed);
+  ctx.save();
+  ctx.shadowColor = 'rgba(41,224,255,0.65)'; ctx.shadowBlur = 20;
+  ctx.fillStyle = '#7df3ff';
+  ctx.font = '700 80px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(dispSpeed, CX, CY + R * 0.47);
+  ctx.restore();
+
+  ctx.fillStyle = 'rgba(95,239,255,0.55)';
+  ctx.font = '500 14px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('км/ч', CX, CY + R * 0.47 + 42);
+
+  // ── мини-статус GPS ──
+  const gpsLabel = gpsActive ? '⬤ GPS' : '– –';
+  const gpsColor = gpsActive ? '#2de8b2' : 'rgba(255,255,255,0.25)';
+  ctx.fillStyle = gpsColor;
+  ctx.font = '500 12px Segoe UI, Arial, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(gpsLabel, CX, CY + R * 0.47 + 62);
+}
+
+// ─── объёмная стрелка ─────────────────────────────────────────────────────────
+function drawNeedle(ctx, angle) {
+  const NL = R - 48;   // длина
+  const NW = 7;        // полуширина у основания
+
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(angle);
+
+  // тень/глоу
+  ctx.shadowColor = '#29e0ff'; ctx.shadowBlur = 18;
+
+  // основное тело (трапеция)
+  ctx.beginPath();
+  ctx.moveTo(-NL * 0.18,  NW);
+  ctx.lineTo( NL * 0.78,  3);
+  ctx.lineTo( NL,          0);
+  ctx.lineTo( NL * 0.78, -3);
+  ctx.lineTo(-NL * 0.18, -NW);
+  ctx.closePath();
+
+  const nGrad = ctx.createLinearGradient(0, 0, NL, 0);
+  nGrad.addColorStop(0,    '#062732');
+  nGrad.addColorStop(0.35, '#1390b4');
+  nGrad.addColorStop(0.75, '#29e0ff');
+  nGrad.addColorStop(1,    '#9ef6ff');
+  ctx.fillStyle = nGrad;
+  ctx.fill();
+
+  // светлая полоска-блик (верхняя часть)
+  ctx.beginPath();
+  ctx.moveTo(-NL * 0.10, -NW + 2);
+  ctx.lineTo( NL * 0.80, -1.5);
+  ctx.lineTo( NL,          0);
+  ctx.lineTo(-NL * 0.10, -1);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(200,248,255,0.28)';
+  ctx.shadowBlur = 0;
+  ctx.fill();
+
+  // тёмная нижняя тень (даёт объём)
+  ctx.beginPath();
+  ctx.moveTo(-NL * 0.18,  NW);
+  ctx.lineTo( NL * 0.78,  3);
+  ctx.lineTo(-NL * 0.10,  1);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fill();
+
+  // противовес (хвост)
+  ctx.beginPath();
+  ctx.moveTo(-NL * 0.18,  NW * 0.7);
+  ctx.lineTo(-NL * 0.28,  0);
+  ctx.lineTo(-NL * 0.18, -NW * 0.7);
+  ctx.closePath();
+  ctx.fillStyle = '#0a2d3c';
+  ctx.shadowBlur = 0;
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// ─── центральный металлический узел ──────────────────────────────────────────
+function drawHub(ctx) {
+  // внешнее кольцо
+  const hubG = ctx.createRadialGradient(CX - 4, CY - 4, 1, CX, CY, 18);
+  hubG.addColorStop(0,   '#3a7a94');
+  hubG.addColorStop(0.5, '#0e2a36');
+  hubG.addColorStop(1,   '#050e14');
+  ctx.beginPath();
+  ctx.arc(CX, CY, 18, 0, Math.PI * 2);
+  ctx.fillStyle = hubG; ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(CX, CY, 18, 0, Math.PI * 2);
+  ctx.strokeStyle = '#29e0ff'; ctx.lineWidth = 2.5;
+  ctx.shadowColor = '#29e0ff'; ctx.shadowBlur = 10;
+  ctx.stroke(); ctx.shadowBlur = 0;
+
+  // блик на втулке
+  ctx.beginPath();
+  ctx.arc(CX - 5, CY - 5, 5, 0, Math.PI * 2);
+  const hG2 = ctx.createRadialGradient(CX - 6, CY - 6, 0, CX - 5, CY - 5, 5);
+  hG2.addColorStop(0,   'rgba(200,248,255,0.55)');
+  hG2.addColorStop(1,   'rgba(200,248,255,0)');
+  ctx.fillStyle = hG2; ctx.fill();
+
+  // центральная точка
+  ctx.beginPath();
+  ctx.arc(CX, CY, 4, 0, Math.PI * 2);
+  ctx.fillStyle = '#7df3ff'; ctx.fill();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  АНИМАЦИЯ — физика
+// ═══════════════════════════════════════════════════════════════════════════════
+const STIFFNESS = 0.035;   // сила пружины
+const DAMPING   = 0.78;    // демпфирование
+
+function animate() {
+  const target = speedToAngle(targetValue);
+  const force  = (target - displayAngle) * STIFFNESS;
+  velocity = (velocity + force) * DAMPING;
+  displayAngle += velocity;
+
+  // синхронизируем currentValue для цифры
+  currentValue = angleToSpeed(displayAngle);
+
+  drawForeground();
+  requestAnimationFrame(animate);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SWEEP АНИМАЦИЯ при запуске
+// ═══════════════════════════════════════════════════════════════════════════════
+function runSweep() {
+  // 0 → 140 → 0 за ~1.8с, затем в текущее значение
+  let phase = 0; // 0 = разгон, 1 = торможение, 2 = готово
+  const sweepPeak = 140;
+  const sweepUp   = 900;   // мс на разгон
+  const sweepDown  = 900;
+
+  const t0 = performance.now();
+  sweepDone = false;
+
+  function tick(now) {
+    const elapsed = now - t0;
+    if (phase === 0) {
+      targetValue = (elapsed / sweepUp) * sweepPeak;
+      if (elapsed >= sweepUp) { phase = 1; }
+    } else if (phase === 1) {
+      const t1 = elapsed - sweepUp;
+      targetValue = sweepPeak * (1 - t1 / sweepDown);
+      if (elapsed >= sweepUp + sweepDown) {
+        targetValue = 0;
+        phase = 2;
+        sweepDone = true;
+        return;
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  GPS
+// ═══════════════════════════════════════════════════════════════════════════════
+const gpsBtn = document.getElementById('gpsBtn');
+
+function startGPS() {
+  gpsActive = true;
+  gpsBtn.classList.add('active');
+  if (!('geolocation' in navigator)) return;
+  watchId = navigator.geolocation.watchPosition(
+    pos => {
+      const s = pos.coords.speed;
+      if (s === null || isNaN(s)) return;
+      targetValue = Math.min(Math.max(s * 3.6, 0), MAX_SPEED);
+    },
+    () => stopGPS(),
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+  );
+}
+
+function stopGPS() {
+  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  gpsActive = false;
+  gpsBtn.classList.remove('active');
+  targetValue = 0;
+}
+
+gpsBtn.addEventListener('click', () => gpsActive ? stopGPS() : startGPS());
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  СТАРТ
+// ═══════════════════════════════════════════════════════════════════════════════
+drawBackground();
+animate();
+setTimeout(runSweep, 200);
+</script>
+
+</body>
+</html>
