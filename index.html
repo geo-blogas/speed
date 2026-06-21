@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Speed</title>
+<title>Спидометр v7</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -53,6 +53,8 @@
     border-color: #ff3b30; color: #ff3b30;
     box-shadow: 0 0 14px rgba(255,59,48,0.4);
   }
+
+
 </style>
 </head>
 <body>
@@ -214,6 +216,9 @@ function drawForeground() {
   const curAngle = displayAngle;
   const speed    = currentValue;
 
+  // ── ореол от центра по зонам скорости ──
+  drawAura(ctx, speed);
+
   // ── активная (пройденная) дуга ──
   ctx.save();
   ctx.shadowColor = '#29e0ff'; ctx.shadowBlur = 22;
@@ -281,6 +286,75 @@ function drawForeground() {
   ctx.font = '500 12px Segoe UI, Arial, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(gpsLabel, CX, CY + R * 0.47 + 62);
+}
+
+// ─── ореол по зонам скорости ──────────────────────────────────────────────────
+function drawAura(ctx, speed) {
+  // определяем цвет и интенсивность по зонам
+  let r, g, b, intensity;
+
+  if (speed <= 50) {
+    // зелёный, слабый, нарастает 0→50
+    r = 29; g = 233; b = 150;
+    intensity = (speed / 50) * 0.32;
+  } else if (speed <= 90) {
+    // переход зелёный→жёлтый, средний
+    const t = (speed - 50) / 40;
+    r = Math.round(29  + t * (255 - 29));
+    g = Math.round(233 + t * (220 - 233));
+    b = Math.round(150 + t * (0   - 150));
+    intensity = 0.32 + t * 0.18;  // 0.32 → 0.50
+  } else if (speed <= 110) {
+    // жёлтый, плавный переход к красному
+    const t = (speed - 90) / 20;
+    r = 255;
+    g = Math.round(220 - t * 180);
+    b = 0;
+    intensity = 0.50 + t * 0.15;  // 0.50 → 0.65
+  } else {
+    // красный, яркий, нарастает 110→140
+    const t = Math.min((speed - 110) / 30, 1);
+    r = 255; g = Math.round(40 - t * 40); b = 0;
+    intensity = 0.65 + t * 0.25;  // 0.65 → 0.90
+  }
+
+  if (intensity <= 0.01) return;
+
+  const color = `${r},${g},${b}`;
+
+  // слой 1 — широкий мягкий ореол (весь диск)
+  const g1 = ctx.createRadialGradient(CX, CY, 0, CX, CY, R * 0.95);
+  g1.addColorStop(0,    `rgba(${color},${(intensity * 0.9).toFixed(2)})`);
+  g1.addColorStop(0.45, `rgba(${color},${(intensity * 0.4).toFixed(2)})`);
+  g1.addColorStop(1,    `rgba(${color},0)`);
+  ctx.beginPath();
+  ctx.arc(CX, CY, R * 0.95, 0, Math.PI * 2);
+  ctx.fillStyle = g1;
+  ctx.fill();
+
+  // слой 2 — концентрированное свечение в центре
+  const g2 = ctx.createRadialGradient(CX, CY, 0, CX, CY, R * 0.38);
+  g2.addColorStop(0,   `rgba(${color},${(intensity * 0.55).toFixed(2)})`);
+  g2.addColorStop(0.6, `rgba(${color},${(intensity * 0.15).toFixed(2)})`);
+  g2.addColorStop(1,   `rgba(${color},0)`);
+  ctx.beginPath();
+  ctx.arc(CX, CY, R * 0.38, 0, Math.PI * 2);
+  ctx.fillStyle = g2;
+  ctx.fill();
+
+  // слой 3 — свечение по ободу (пульс на высоких скоростях)
+  if (speed > 90) {
+    const pulse = speed > 110 ? 0.5 + 0.5 * Math.sin(Date.now() / 180) : 1;
+    const rimAlpha = ((intensity - 0.5) * pulse * 0.6).toFixed(2);
+    const g3 = ctx.createRadialGradient(CX, CY, R * 0.72, CX, CY, R * 1.0);
+    g3.addColorStop(0,   `rgba(${color},0)`);
+    g3.addColorStop(0.6, `rgba(${color},${rimAlpha})`);
+    g3.addColorStop(1,   `rgba(${color},0)`);
+    ctx.beginPath();
+    ctx.arc(CX, CY, R, 0, Math.PI * 2);
+    ctx.fillStyle = g3;
+    ctx.fill();
+  }
 }
 
 // ─── объёмная стрелка ─────────────────────────────────────────────────────────
