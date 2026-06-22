@@ -2,542 +2,1108 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Speed v7</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Вовины Котлы + Speed</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { color-scheme: dark; background-color: #000; }
 
   html, body {
     width: 100%; height: 100%;
-    background: radial-gradient(ellipse at 50% 40%, #060c10 0%, #000000 75%);
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #000;
     overflow: hidden;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
   }
 
-  .gauge-wrap {
+  .wrap {
     position: relative;
-    width: min(92vmin, 540px);
-    height: min(92vmin, 540px);
+    display: flex; align-items: center; justify-content: center;
   }
 
-  /* два canvas — статика и динамика */
+  /* Все canvas абсолютно позиционированы поверх друг друга */
   canvas {
     position: absolute; top: 0; left: 0;
-    width: 100%; height: 100%;
+    display: block; touch-action: none;
   }
 
-  #bgCanvas  { z-index: 1; }
-  #fgCanvas  { z-index: 2; }
+  #speedBg { z-index: 1; }
+  #speedFg  { z-index: 2; }
+  #dial     { z-index: 3; }
+  #speedWin { z-index: 4; }
 
-  .controls {
+  /* ── Будильник — на полосе спидометра внизу ── */
+  .alarm-row {
     position: fixed;
-    bottom: 20px; left: 50%;
+    left: 50%;
     transform: translateX(-50%);
-    display: flex; gap: 12px; align-items: center;
-  }
-
-  .gps-btn {
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.35);
-    color: #fff;
-    padding: 8px 24px;
+    display: flex; align-items: center; gap: 8px; z-index: 5;
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(41,224,255,0.20);
     border-radius: 20px;
-    font-size: 13px; letter-spacing: 1.5px;
-    cursor: pointer;
-    transition: all 0.25s;
+    padding: 3px 12px 3px 8px;
+    backdrop-filter: blur(4px);
+  }
+  .alarm-display {
+    font-weight: 100; font-size: 18px;
+    color: rgba(200,215,255,0.55); letter-spacing: 0.04em;
+    cursor: pointer; user-select: none; transition: color 0.3s;
+  }
+  .alarm-display.active { color: #6aa8ff; text-shadow: 0 0 14px rgba(90,160,255,0.75); }
+  .alarm-label { font-size: 9px; color: rgba(200,215,255,0.5); letter-spacing: 0.18em; text-transform: uppercase; user-select: none; }
+  .alarm-col { display: flex; flex-direction: column; align-items: center; }
+  .alarm-btn {
+    background: none; border: 1px solid rgba(200,215,255,0.3);
+    border-radius: 50%; width: 32px; height: 32px;
+    color: rgba(200,215,255,0.6); font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-appearance: none; transition: border-color 0.2s, color 0.2s;
+  }
+  .alarm-btn.bell-active { border-color: #e83030; color: #ff4040; text-shadow: 0 0 10px rgba(255,60,60,0.7); }
+
+  /* ── GPS кнопка ── */
+  .gps-btn {
+    position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%);
+    background: transparent; border: 1px solid rgba(255,255,255,0.35);
+    color: #fff; padding: 6px 20px; border-radius: 20px;
+    font-size: 12px; letter-spacing: 1.5px; cursor: pointer;
+    transition: all 0.25s; z-index: 10; -webkit-appearance: none;
   }
   .gps-btn:hover { background: rgba(255,255,255,0.07); border-color:#fff; }
-  .gps-btn.active {
-    background: rgba(255,59,48,0.14);
-    border-color: #ff3b30; color: #ff3b30;
-    box-shadow: 0 0 14px rgba(255,59,48,0.4);
+  .gps-btn.active { background: rgba(255,59,48,0.14); border-color:#ff3b30; color:#ff3b30; box-shadow:0 0 14px rgba(255,59,48,0.4); }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,5,0.88); z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.3s;
   }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+  .modal {
+    background: #080c18; border: 1px solid rgba(80,120,255,0.1);
+    border-radius: 20px; padding: 32px 28px;
+    display: flex; flex-direction: column; align-items: center; gap: 20px;
+    width: min(320px, 88vw);
+  }
+  .modal h2 { font-weight: 300; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(180,200,255,0.35); }
+  .time-picker { display: flex; align-items: center; gap: 8px; }
+  .picker-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .picker-val { font-weight: 100; font-size: 42px; color: #c8d8ff; letter-spacing: -0.03em; width: 64px; text-align: center; user-select: none; }
+  .picker-btn { background: none; border: none; color: rgba(180,200,255,0.3); font-size: 20px; cursor: pointer; padding: 4px 12px; -webkit-appearance: none; }
+  .picker-sep { font-weight: 100; font-size: 36px; color: #2050cc; margin-bottom: 4px; }
+  .modal-actions { display: flex; gap: 12px; width: 100%; }
+  .btn-cancel, .btn-set { flex: 1; padding: 12px; border-radius: 10px; border: none; font-size: 14px; letter-spacing: 0.06em; cursor: pointer; -webkit-appearance: none; }
+  .btn-cancel { background: rgba(255,255,255,0.04); color: rgba(180,200,255,0.35); }
+  .btn-set { background: #1a3a8b; color: #fff; }
 
+  /* ── Ring ── */
+  .ring-overlay {
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, #1a0606 0%, #060202 75%, #000 100%);
+    z-index: 20; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 24px;
+    opacity: 0; pointer-events: none; transition: opacity 0.4s;
+  }
+  .ring-overlay.active { opacity: 1; pointer-events: all; }
+  body.ringing .wrap { opacity: 0.06; transition: opacity 0.4s; }
+  .ring-text { font-weight: 100; font-size: min(44vw,42vh); line-height: 0.9; color: #e0e8ff; letter-spacing: -0.04em; text-shadow: 0 0 50px rgba(90,160,255,0.55); }
+  .ring-label { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: #2050cc; }
+  .btn-dismiss { margin-top: 16px; padding: 14px 40px; background: none; border: 1px solid #2050cc; border-radius: 50px; color: #2050cc; font-size: 13px; letter-spacing: 0.14em; cursor: pointer; -webkit-appearance: none; }
 
+  body.dimmed canvas { opacity: 0.12; }
+  body.dimmed .alarm-row { opacity: 0.12; }
 </style>
 </head>
 <body>
 
-<div class="gauge-wrap">
-  <canvas id="bgCanvas" width="600" height="600"></canvas>
-  <canvas id="fgCanvas" width="600" height="600"></canvas>
+<div class="wrap" id="mainWrap">
+  <!-- спидометр фон (статика: шкала, деления) -->
+  <canvas id="speedBg"></canvas>
+  <!-- спидометр перед (стрелка, дуга, ореол) — ПОД часами -->
+  <canvas id="speedFg"></canvas>
+  <!-- часы — ПОВЕРХ стрелки спидометра -->
+  <canvas id="dial"></canvas>
+  <!-- окошко скорости — ПОВЕРХ всего -->
+  <canvas id="speedWin"></canvas>
 </div>
 
-<div class="controls">
-  <button class="gps-btn" id="gpsBtn">⬤ GPS</button>
+<!-- Будильник — снаружи циферблата, внизу -->
+<div class="alarm-row" id="alarmRow">
+  <button class="alarm-btn" id="bellBtn" onclick="openAlarm()">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+  </button>
+  <div class="alarm-col">
+    <div class="alarm-display" id="alarmDisplay" onclick="openAlarm()">--:--</div>
+    <div class="alarm-label" id="alarmLabel">будильник</div>
+  </div>
+  <button class="alarm-btn" id="alarmToggle" onclick="toggleAlarm()" style="display:none">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  </button>
+</div>
+
+<button class="gps-btn" id="gpsBtn">⬤ GPS</button>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2>Установить будильник</h2>
+    <div class="time-picker">
+      <div class="picker-col">
+        <button class="picker-btn" onclick="adjAlarm('h',1)">▲</button>
+        <div class="picker-val" id="pHH">07</div>
+        <button class="picker-btn" onclick="adjAlarm('h',-1)">▼</button>
+      </div>
+      <div class="picker-sep">:</div>
+      <div class="picker-col">
+        <button class="picker-btn" onclick="adjAlarm('m',1)">▲</button>
+        <div class="picker-val" id="pMM">00</div>
+        <button class="picker-btn" onclick="adjAlarm('m',-1)">▼</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAlarm()">Отмена</button>
+      <button class="btn-set" onclick="setAlarm()">Установить</button>
+    </div>
+  </div>
+</div>
+
+<audio id="ringAudio" src="ring.mp3" loop preload="auto"></audio>
+<div class="ring-overlay" id="ringOverlay">
+  <div class="ring-label">будильник</div>
+  <div class="ring-text" id="ringTime">--:--</div>
+  <button class="btn-dismiss" onclick="dismissAlarm()">Отключить</button>
 </div>
 
 <script>
-// ─── константы ────────────────────────────────────────────────────────────────
-const MAX_SPEED   = 140;
-const ZONE_LIMIT  = 50;
-const START_ANGLE = Math.PI * 0.75;
-const END_ANGLE   = Math.PI * 2.25;
-const ANGLE_RANGE = END_ANGLE - START_ANGLE;
+// ════════════════════════════════════════════════════════════════
+//  БУДИЛЬНИК (глобальные функции для onclick)
+// ════════════════════════════════════════════════════════════════
+const pad = n => String(n).padStart(2,'0');
+let alarmH = 7, alarmM = 0, alarmSet = false, alarmFired = false;
 
-// ─── canvas ───────────────────────────────────────────────────────────────────
-const bgCanvas = document.getElementById('bgCanvas');
-const bgCtx    = bgCanvas.getContext('2d');
-const fgCanvas = document.getElementById('fgCanvas');
-const fgCtx    = fgCanvas.getContext('2d');
-
-const W = bgCanvas.width, H = bgCanvas.height;
-const CX = W / 2, CY = H / 2;
-const R  = W * 0.42;
-
-// ─── физика стрелки ───────────────────────────────────────────────────────────
-let displayAngle  = speedToAngle(0);
-let velocity      = 0;
-let targetValue   = 0;
-let currentValue  = 0;   // только для цифры
-
-// ─── GPS / sweep ──────────────────────────────────────────────────────────────
-let watchId    = null;
-let gpsActive  = false;
-let sweepDone  = false;
-
-function speedToAngle(speed) {
-  return START_ANGLE + Math.min(Math.max(speed / MAX_SPEED, 0), 1) * ANGLE_RANGE;
+function openAlarm() {
+  document.getElementById('pHH').textContent = pad(alarmH);
+  document.getElementById('pMM').textContent = pad(alarmM);
+  document.getElementById('modal').classList.add('open');
 }
-function angleToSpeed(a) {
-  return Math.max(0, Math.min(MAX_SPEED, ((a - START_ANGLE) / ANGLE_RANGE) * MAX_SPEED));
+function closeAlarm() { document.getElementById('modal').classList.remove('open'); }
+function adjAlarm(unit, delta) {
+  if (unit==='h') alarmH = (alarmH+delta+24)%24;
+  else alarmM = (alarmM+delta+60)%60;
+  document.getElementById('pHH').textContent = pad(alarmH);
+  document.getElementById('pMM').textContent = pad(alarmM);
 }
+function setAlarm() {
+  const audio = document.getElementById('ringAudio');
+  if (audio) audio.load();
+  alarmSet = true; alarmFired = false;
+  document.getElementById('alarmDisplay').textContent = pad(alarmH)+':'+pad(alarmM);
+  document.getElementById('alarmDisplay').classList.add('active');
+  document.getElementById('alarmToggle').style.display = 'flex';
+  document.getElementById('alarmLabel').textContent = 'будильник ✓';
+  document.getElementById('bellBtn').classList.add('bell-active');
+  closeAlarm();
+}
+function toggleAlarm() {
+  alarmSet = false;
+  document.getElementById('alarmDisplay').textContent = '--:--';
+  document.getElementById('alarmDisplay').classList.remove('active');
+  document.getElementById('alarmToggle').style.display = 'none';
+  document.getElementById('alarmLabel').textContent = 'будильник';
+  document.getElementById('bellBtn').classList.remove('bell-active');
+  dismissAlarm();
+}
+function ring() {
+  document.getElementById('ringTime').textContent = pad(alarmH)+':'+pad(alarmM);
+  document.getElementById('ringOverlay').classList.add('active');
+  document.body.classList.add('ringing');
+  const audio = document.getElementById('ringAudio');
+  if (audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
+  if (navigator.vibrate) navigator.vibrate([500,200,500,200,500,200,500]);
+}
+function dismissAlarm() {
+  document.getElementById('ringOverlay').classList.remove('active');
+  document.body.classList.remove('ringing');
+  const audio = document.getElementById('ringAudio');
+  if (audio) { audio.pause(); audio.currentTime = 0; }
+  if (navigator.vibrate) navigator.vibrate(0);
+}
+setInterval(() => {
+  if (!alarmSet || alarmFired) return;
+  const now = new Date();
+  if (now.getHours()===alarmH && now.getMinutes()===alarmM && now.getSeconds()<5) { alarmFired=true; ring(); }
+  if (!(now.getHours()===alarmH && now.getMinutes()===alarmM)) alarmFired=false;
+}, 500);
+</script>
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  ФОНОВЫЙ СЛОЙ — рисуется ОДИН раз (или при resize)
-// ═══════════════════════════════════════════════════════════════════════════════
-function drawBackground() {
-  const ctx = bgCtx;
-  ctx.clearRect(0, 0, W, H);
+<script>
+document.addEventListener('DOMContentLoaded', function() {
 
-  // ── фон диска ──
-  const bgG = ctx.createRadialGradient(CX, CY, R * 0.1, CX, CY, R * 1.1);
-  bgG.addColorStop(0,   '#0b1117');
-  bgG.addColorStop(0.7, '#060b0f');
-  bgG.addColorStop(1,   '#000000');
-  ctx.beginPath();
-  ctx.arc(CX, CY, R * 1.08, 0, Math.PI * 2);
-  ctx.fillStyle = bgG;
-  ctx.fill();
+// ════════════════════════════════════════════════════════════════
+//  РАЗМЕРЫ — единая система координат для всех слоёв
+// ════════════════════════════════════════════════════════════════
+const DPR  = window.devicePixelRatio || 1;
+const wrap = document.getElementById('mainWrap');
 
-  // ── внешний хром-обод (3 слоя) ──
-  [
-    { r: R * 1.08, lw: 8,  color: '#0e1e28' },
-    { r: R * 1.04, lw: 3,  color: '#1c3a4a' },
-    { r: R * 1.01, lw: 1.5,color: 'rgba(41,224,255,0.18)' }
-  ].forEach(o => {
-    ctx.beginPath();
-    ctx.arc(CX, CY, o.r, 0, Math.PI * 2);
-    ctx.strokeStyle = o.color; ctx.lineWidth = o.lw; ctx.stroke();
+// canvas часов
+const dialCanvas = document.getElementById('dial');
+const ctx        = dialCanvas.getContext('2d');
+
+// canvas спидометра
+const speedBgCanvas = document.getElementById('speedBg');
+const speedBgCtx    = speedBgCanvas.getContext('2d');
+const speedFgCanvas = document.getElementById('speedFg');
+const speedFgCtx    = speedFgCanvas.getContext('2d');
+const speedWinCanvas = document.getElementById('speedWin');
+const speedWinCtx    = speedWinCanvas.getContext('2d');
+
+// Общие переменные размера (логические пиксели)
+let SIZE, CX, CY;
+// Радиус часового циферблата
+let CLOCK_R;
+// Радиус спидометра (внешнего кольца) — логический
+let SPD_R_IN, SPD_R_OUT;
+
+function resize() {
+  const vw = window.innerWidth  || 375;
+  const vh = window.innerHeight || 667;
+  const isLandscape = vw > vh;
+
+  let avail;
+  if (isLandscape) avail = Math.min(vh * 0.86, vw * 0.55);
+  else             avail = Math.min(vw, vh * 0.70);
+  if (!avail || avail <= 0) avail = 320;
+
+  SIZE = Math.floor(avail * 0.96);
+
+  // Общий размер wrap — под внешний круг спидометра
+  wrap.style.width  = SIZE + 'px';
+  wrap.style.height = SIZE + 'px';
+
+  CX = SIZE / 2;
+  CY = SIZE / 2;
+
+  // Спидометр — самое внешнее кольцо
+  SPD_R_OUT = SIZE / 2 - 2;          // внешний край шкалы
+  SPD_R_IN  = SPD_R_OUT * 0.76;      // внутренний край шкалы (где начинаются часы)
+
+  // Часы занимают пространство внутри шкалы
+  CLOCK_R = SPD_R_IN - 4;
+
+  // Настройка всех canvas (одинаковый размер = весь wrap)
+  [dialCanvas, speedBgCanvas, speedFgCanvas, speedWinCanvas].forEach(c => {
+    c.style.width  = SIZE + 'px';
+    c.style.height = SIZE + 'px';
+    c.width  = SIZE * DPR;
+    c.height = SIZE * DPR;
   });
 
-  // ── виньет-тень по краю ──
-  const vgr = ctx.createRadialGradient(CX, CY, R * 0.6, CX, CY, R * 1.08);
-  vgr.addColorStop(0, 'rgba(0,0,0,0)');
-  vgr.addColorStop(1, 'rgba(0,0,0,0.55)');
-  ctx.beginPath();
-  ctx.arc(CX, CY, R * 1.08, 0, Math.PI * 2);
-  ctx.fillStyle = vgr; ctx.fill();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  speedBgCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  speedFgCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  speedWinCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
 
-  // ── фоновая дуга шкалы ──
-  ctx.beginPath();
-  ctx.arc(CX, CY, R, START_ANGLE, END_ANGLE);
-  ctx.strokeStyle = 'rgba(41,224,255,0.08)';
-  ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
+resize();
+window.addEventListener('resize', () => { resize(); drawSpeedBg(); positionAlarm(); });
+window.addEventListener('orientationchange', () => setTimeout(() => { resize(); drawSpeedBg(); positionAlarm(); }, 150));
+setTimeout(() => { resize(); drawSpeedBg(); positionAlarm(); }, 50);
+setTimeout(() => { resize(); drawSpeedBg(); positionAlarm(); }, 300);
 
-  // ── зона 0–50 км/ч (зелёная дуга) ──
-  const zoneAngle = speedToAngle(ZONE_LIMIT);
-  ctx.save();
-  ctx.shadowColor = '#1de9b6'; ctx.shadowBlur = 8;
-  ctx.beginPath();
-  ctx.arc(CX, CY, R, START_ANGLE, zoneAngle);
-  ctx.strokeStyle = 'rgba(29,233,182,0.22)';
-  ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
-  ctx.restore();
+// Позиционирует будильник на полосе спидометра у 6 часов
+function positionAlarm() {
+  const alarmRow = document.getElementById('alarmRow');
+  if (!alarmRow) return;
+  const wrapRect = wrap.getBoundingClientRect();
+  const pageCX = wrapRect.left + wrapRect.width  / 2;
+  const pageCY = wrapRect.top  + wrapRect.height / 2;
+  // середина полосы спидометра у 6 часов
+  const bandMid = (SPD_R_OUT + SPD_R_IN) / 2;
+  const bandY   = pageCY + bandMid;
+  alarmRow.style.top    = Math.round(bandY) + 'px';
+  alarmRow.style.bottom = 'auto';
+}
 
-  // ── деления ──
+// ════════════════════════════════════════════════════════════════
+//  СПИДОМЕТР — константы
+// ════════════════════════════════════════════════════════════════
+const MAX_SPEED   = 140;
+const ZONE_LIMIT  = 50;
+const SPD_START   = Math.PI * 0.75;   // 135° — левый нижний
+const SPD_END     = Math.PI * 2.25;   // 405° — правый нижний (240° дуга)
+const SPD_RANGE   = SPD_END - SPD_START;
+
+let displayAngle = spdToAngle(0);
+let velocity     = 0;
+let targetValue  = 0;
+let spdCurrent   = 0;   // для цифры и ореола
+
+let watchId   = null;
+let gpsActive = false;
+
+function spdToAngle(speed) {
+  return SPD_START + Math.min(Math.max(speed / MAX_SPEED, 0), 1) * SPD_RANGE;
+}
+function angleToSpd(a) {
+  return Math.max(0, Math.min(MAX_SPEED, ((a - SPD_START) / SPD_RANGE) * MAX_SPEED));
+}
+
+// ── Фон спидометра (статика) ──────────────────────────────────
+function drawSpeedBg() {
+  const ctx2 = speedBgCtx;
+  ctx2.clearRect(0, 0, SIZE, SIZE);
+
+  const R_OUT = SPD_R_OUT;
+  const R_MID = (SPD_R_OUT + SPD_R_IN) / 2;  // средняя линия шкалы
+  const TRACK = SPD_R_OUT - SPD_R_IN;         // ширина полосы шкалы
+
+  // ── внешний хром-обод ──
+  [
+    { r: R_OUT,       lw: 5,   color: '#0e1e28' },
+    { r: R_OUT - 3,   lw: 2,   color: '#1c3a4a' },
+    { r: R_OUT - 5,   lw: 1,   color: 'rgba(41,224,255,0.15)' }
+  ].forEach(o => {
+    ctx2.beginPath();
+    ctx2.arc(CX, CY, o.r, 0, Math.PI * 2);
+    ctx2.strokeStyle = o.color; ctx2.lineWidth = o.lw; ctx2.stroke();
+  });
+
+  // ── затемнённый промежуток между спидометром и часами ──
+  ctx2.beginPath();
+  ctx2.arc(CX, CY, SPD_R_IN + 1, 0, Math.PI * 2);
+  ctx2.strokeStyle = 'rgba(0,0,0,0.7)'; ctx2.lineWidth = 3; ctx2.stroke();
+
+  // ── фоновая дуга шкалы (тусклая) ──
+  ctx2.beginPath();
+  ctx2.arc(CX, CY, R_MID, SPD_START, SPD_END);
+  ctx2.strokeStyle = 'rgba(41,224,255,0.08)';
+  ctx2.lineWidth = TRACK * 0.55; ctx2.lineCap = 'round'; ctx2.stroke();
+
+  // ── зона 0–50 (зелёный фон) ──
+  ctx2.save();
+  ctx2.shadowColor = '#1de9b6'; ctx2.shadowBlur = 6;
+  ctx2.beginPath();
+  ctx2.arc(CX, CY, R_MID, SPD_START, spdToAngle(ZONE_LIMIT));
+  ctx2.strokeStyle = 'rgba(29,233,182,0.18)';
+  ctx2.lineWidth = TRACK * 0.55; ctx2.lineCap = 'round'; ctx2.stroke();
+  ctx2.restore();
+
+  // ── деления и цифры ──
   const majorStep = 20, minorStep = 5;
   for (let v = 0; v <= MAX_SPEED; v += minorStep) {
-    const angle   = speedToAngle(v);
+    const angle   = spdToAngle(v);
     const isMajor = v % majorStep === 0;
-    const innerR  = isMajor ? R - 26 : R - 16;
-    const outerR  = R - 4;
 
-    ctx.beginPath();
-    ctx.moveTo(CX + Math.cos(angle) * innerR, CY + Math.sin(angle) * innerR);
-    ctx.lineTo(CX + Math.cos(angle) * outerR, CY + Math.sin(angle) * outerR);
+    // деление: от внутреннего до внешнего края кольца
+    const innerR = SPD_R_IN  + TRACK * 0.12;
+    const outerR = SPD_R_OUT - TRACK * 0.12;
+    const shortR = isMajor ? innerR : innerR + TRACK * 0.28;
 
-    // цвет деления по зоне
     let color;
-    if (v <= 50)       color = isMajor ? '#2de8b2' : 'rgba(45,232,178,0.45)';
-    else if (v <= 100) color = isMajor ? '#5fefff' : 'rgba(95,239,255,0.45)';
-    else               color = isMajor ? '#c8f0ff' : 'rgba(200,240,255,0.35)';
+    if (v <= 50)       color = isMajor ? '#2de8b2' : 'rgba(45,232,178,0.4)';
+    else if (v <= 100) color = isMajor ? '#5fefff' : 'rgba(95,239,255,0.4)';
+    else               color = isMajor ? '#c8f0ff' : 'rgba(200,240,255,0.3)';
 
-    ctx.strokeStyle = color;
-    ctx.lineWidth = isMajor ? 3 : 1.5;
-    ctx.stroke();
+    ctx2.beginPath();
+    ctx2.moveTo(CX + Math.cos(angle) * shortR, CY + Math.sin(angle) * shortR);
+    ctx2.lineTo(CX + Math.cos(angle) * outerR, CY + Math.sin(angle) * outerR);
+    ctx2.strokeStyle = color;
+    ctx2.lineWidth = isMajor ? 2 : 1;
+    ctx2.lineCap = 'butt';
+    ctx2.stroke();
 
+    // цифры — внутри полосы, у внутреннего края
     if (isMajor) {
-      const textR = R - 50;
+      const fs     = Math.max(Math.round(TRACK * 0.42), 7);
+      const textR  = SPD_R_IN + TRACK * 0.44;  // середина полосы ближе к внутреннему краю
       const tx = CX + Math.cos(angle) * textR;
       const ty = CY + Math.sin(angle) * textR;
 
-      // цвет цифр по зоне
+      // маленький тёмный фон под цифрой
+      ctx2.save();
+      ctx2.beginPath();
+      ctx2.arc(tx, ty, fs * 0.72, 0, Math.PI * 2);
+      ctx2.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx2.fill();
+      ctx2.restore();
+
       let fc;
       if (v <= 50)       fc = '#2de8b2';
       else if (v <= 100) fc = '#a8e8ff';
       else               fc = '#ddf5ff';
 
-      ctx.fillStyle = fc;
-      ctx.font = '600 17px Segoe UI, Arial, sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(v, tx, ty);
+      ctx2.fillStyle = fc;
+      ctx2.font = `600 ${fs}px Segoe UI, Arial, sans-serif`;
+      ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
+      ctx2.fillText(v, tx, ty);
     }
   }
-
-  // ── блик стекла (верхняя полуокружность) ──
-  const glassG = ctx.createRadialGradient(CX, CY - R * 0.35, R * 0.1, CX, CY - R * 0.1, R * 0.9);
-  glassG.addColorStop(0,   'rgba(255,255,255,0.10)');
-  glassG.addColorStop(0.5, 'rgba(255,255,255,0.03)');
-  glassG.addColorStop(1,   'rgba(255,255,255,0)');
-  ctx.beginPath();
-  ctx.arc(CX, CY, R * 1.0, 0, Math.PI * 2);
-  ctx.fillStyle = glassG; ctx.fill();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  ПЕРЕДНИЙ СЛОЙ — каждый кадр
-// ═══════════════════════════════════════════════════════════════════════════════
-function drawForeground() {
-  const ctx = fgCtx;
-  ctx.clearRect(0, 0, W, H);
+// ── Передний слой спидометра (каждый кадр) ──────────────────────
+function drawSpeedFg() {
+  const ctx2 = speedFgCtx;
+  ctx2.clearRect(0, 0, SIZE, SIZE);
 
+  const speed    = spdCurrent;
   const curAngle = displayAngle;
-  const speed    = currentValue;
+  const R_MID    = (SPD_R_OUT + SPD_R_IN) / 2;
+  const TRACK    = SPD_R_OUT - SPD_R_IN;
 
-  // ── ореол от центра по зонам скорости ──
-  drawAura(ctx, speed);
+  // ── ореол зоны скорости (распространяется внутрь на циферблат) ──
+  drawAura(ctx2, speed);
 
-  // ── активная (пройденная) дуга ──
-  ctx.save();
-  ctx.shadowColor = '#29e0ff'; ctx.shadowBlur = 22;
-  ctx.beginPath();
-  ctx.arc(CX, CY, R, START_ANGLE, curAngle);
-  const arcG = ctx.createLinearGradient(CX - R, CY, CX + R, CY);
+  // ── активная дуга ──
+  ctx2.save();
+  ctx2.shadowColor = '#29e0ff'; ctx2.shadowBlur = 16;
+  ctx2.beginPath();
+  ctx2.arc(CX, CY, R_MID, SPD_START, curAngle);
+  const arcG = ctx2.createLinearGradient(CX - SPD_R_OUT, CY, CX + SPD_R_OUT, CY);
   arcG.addColorStop(0,   '#0c6e8a');
   arcG.addColorStop(0.6, '#29e0ff');
   arcG.addColorStop(1,   '#7df3ff');
-  ctx.strokeStyle = arcG;
-  ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
-  ctx.restore();
+  ctx2.strokeStyle = arcG;
+  ctx2.lineWidth = TRACK * 0.50; ctx2.lineCap = 'round'; ctx2.stroke();
+  ctx2.restore();
 
-  // ── яркие деления (пройденная зона) ──
-  const majorStep = 20, minorStep = 5;
+  // ── яркие деления пройденной зоны ──
+  const minorStep = 5, majorStep = 20;
   for (let v = 0; v <= MAX_SPEED; v += minorStep) {
     if (v > speed) break;
-    const angle   = speedToAngle(v);
+    const angle   = spdToAngle(v);
     const isMajor = v % majorStep === 0;
-    const innerR  = isMajor ? R - 26 : R - 16;
-    const outerR  = R - 4;
-
-    ctx.beginPath();
-    ctx.moveTo(CX + Math.cos(angle) * innerR, CY + Math.sin(angle) * innerR);
-    ctx.lineTo(CX + Math.cos(angle) * outerR, CY + Math.sin(angle) * outerR);
+    const outerR  = SPD_R_OUT - TRACK * 0.12;
+    const shortR  = isMajor ? SPD_R_IN + TRACK * 0.12 : SPD_R_IN + TRACK * 0.37;
 
     let color;
     if (v <= 50)       color = isMajor ? '#2de8b2' : 'rgba(45,232,178,0.7)';
     else if (v <= 100) color = isMajor ? '#5fefff' : 'rgba(95,239,255,0.7)';
     else               color = isMajor ? '#ffffff' : 'rgba(255,255,255,0.5)';
 
-    ctx.save();
-    if (isMajor) { ctx.shadowColor = color; ctx.shadowBlur = 6; }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = isMajor ? 3.5 : 1.8;
-    ctx.stroke();
-    ctx.restore();
+    ctx2.save();
+    if (isMajor) { ctx2.shadowColor = color; ctx2.shadowBlur = 5; }
+    ctx2.beginPath();
+    ctx2.moveTo(CX + Math.cos(angle) * shortR, CY + Math.sin(angle) * shortR);
+    ctx2.lineTo(CX + Math.cos(angle) * outerR, CY + Math.sin(angle) * outerR);
+    ctx2.strokeStyle = color;
+    ctx2.lineWidth = isMajor ? 2.5 : 1.4;
+    ctx2.stroke();
+    ctx2.restore();
   }
 
-  // ── стрелка ──
-  drawNeedle(ctx, curAngle);
-
-  // ── центральный узел ──
-  drawHub(ctx);
-
-  // ── цифровое значение + метка ──
-  const dispSpeed = Math.round(speed);
-  ctx.save();
-  ctx.shadowColor = 'rgba(41,224,255,0.65)'; ctx.shadowBlur = 20;
-  ctx.fillStyle = '#7df3ff';
-  ctx.font = '700 80px Segoe UI, Arial, sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(dispSpeed, CX, CY + R * 0.47);
-  ctx.restore();
-
-  ctx.fillStyle = 'rgba(95,239,255,0.55)';
-  ctx.font = '500 14px Segoe UI, Arial, sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('км/ч', CX, CY + R * 0.47 + 42);
-
-  // ── мини-статус GPS ──
-  const gpsLabel = gpsActive ? '⬤ GPS' : '– –';
-  const gpsColor = gpsActive ? '#2de8b2' : 'rgba(255,255,255,0.25)';
-  ctx.fillStyle = gpsColor;
-  ctx.font = '500 12px Segoe UI, Arial, sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(gpsLabel, CX, CY + R * 0.47 + 62);
+  // ── стрелка спидометра ──
+  // Хвост стрелки — внутри часового диска, кончик — на внешнем ободе кольца
+  drawSpeedNeedle(ctx2, curAngle);
 }
 
-// ─── ореол по зонам скорости ──────────────────────────────────────────────────
-function drawAura(ctx, speed) {
-  // определяем цвет и интенсивность по зонам
+// ── Стрелка спидометра ────────────────────────────────────────
+// Хвост стартует у центра часов, кончик выходит в середину кольца спидометра
+function drawSpeedNeedle(ctx2, angle) {
+  const TIP  = SPD_R_OUT - 3;
+  const TAIL = CLOCK_R * 0.08;
+  const NW   = Math.max(SIZE * 0.038, 12);  // полуширина в самом широком месте
+
+  ctx2.save();
+  ctx2.translate(CX, CY);
+  ctx2.rotate(angle);
+
+  ctx2.shadowColor = '#ff2010'; ctx2.shadowBlur = 24;
+
+  // Элегантная форма: тонкая у хвоста, расширяется к 35%, сужается к кончику
+  const WIDE_AT = TIP * 0.35;   // точка максимальной ширины
+  const TIP_W   = NW * 0.18;    // ширина у кончика (почти нулевая)
+  const CAP_R   = NW * 0.55;    // радиус скругления кончика
+
+  ctx2.beginPath();
+  // нижняя сторона
+  ctx2.moveTo(-TAIL, NW * 0.22);
+  ctx2.bezierCurveTo(
+    WIDE_AT * 0.4, NW * 0.22,
+    WIDE_AT,       NW,
+    TIP - CAP_R,   TIP_W
+  );
+  // скруглённый кончик
+  ctx2.arc(TIP - CAP_R, 0, TIP_W + CAP_R * 0.5, Math.PI * 0.5, -Math.PI * 0.5, true);
+  // верхняя сторона
+  ctx2.bezierCurveTo(
+    WIDE_AT,       -NW,
+    WIDE_AT * 0.4, -NW * 0.22,
+    -TAIL,         -NW * 0.22
+  );
+  ctx2.closePath();
+
+  // основной градиент
+  const nG = ctx2.createLinearGradient(-TAIL, -NW, -TAIL, NW);
+  nG.addColorStop(0,    '#ff5040');
+  nG.addColorStop(0.38, '#cc1a08');
+  nG.addColorStop(0.62, '#991000');
+  nG.addColorStop(1,    '#ff4030');
+  ctx2.fillStyle = nG;
+  ctx2.fill();
+
+  // хромовая полоска по центру (блик)
+  ctx2.shadowBlur = 0;
+  ctx2.beginPath();
+  ctx2.moveTo(-TAIL * 0.7,  -NW * 0.08);
+  ctx2.bezierCurveTo(
+    WIDE_AT * 0.5, -NW * 0.08,
+    WIDE_AT * 0.9, -NW * 0.55,
+    TIP - CAP_R,   -TIP_W * 0.3
+  );
+  ctx2.lineTo(TIP - CAP_R,  TIP_W * 0.3);
+  ctx2.bezierCurveTo(
+    WIDE_AT * 0.9,  NW * 0.08,
+    WIDE_AT * 0.5,  NW * 0.03,
+    -TAIL * 0.7,    NW * 0.03
+  );
+  ctx2.closePath();
+  ctx2.fillStyle = 'rgba(255,180,160,0.30)';
+  ctx2.fill();
+
+  // нижняя тень (глубина)
+  ctx2.beginPath();
+  ctx2.moveTo(-TAIL, NW * 0.22);
+  ctx2.bezierCurveTo(
+    WIDE_AT * 0.4, NW * 0.22,
+    WIDE_AT,       NW,
+    TIP - CAP_R,   TIP_W
+  );
+  ctx2.lineTo(WIDE_AT * 0.8, NW * 0.6);
+  ctx2.bezierCurveTo(WIDE_AT * 0.3, NW * 0.15, -TAIL * 0.8, NW * 0.12, -TAIL, NW * 0.22);
+  ctx2.closePath();
+  ctx2.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx2.fill();
+
+  ctx2.restore();
+}
+
+// ── Ореол по зонам скорости ──────────────────────────────────
+function drawAura(ctx2, speed) {
   let r, g, b, intensity;
-
   if (speed <= 50) {
-    // зелёный, слабый, нарастает 0→50
-    r = 29; g = 233; b = 150;
-    intensity = (speed / 50) * 0.32;
+    r=29; g=233; b=150;
+    intensity = (speed / 50) * 0.28;
   } else if (speed <= 90) {
-    // переход зелёный→жёлтый, средний
-    const t = (speed - 50) / 40;
-    r = Math.round(29  + t * (255 - 29));
-    g = Math.round(233 + t * (220 - 233));
-    b = Math.round(150 + t * (0   - 150));
-    intensity = 0.32 + t * 0.18;  // 0.32 → 0.50
+    const t = (speed-50)/40;
+    r=Math.round(29+t*(255-29)); g=Math.round(233+t*(220-233)); b=Math.round(150+t*(0-150));
+    intensity = 0.28 + t * 0.17;
   } else if (speed <= 110) {
-    // жёлтый, плавный переход к красному
-    const t = (speed - 90) / 20;
-    r = 255;
-    g = Math.round(220 - t * 180);
-    b = 0;
-    intensity = 0.50 + t * 0.15;  // 0.50 → 0.65
+    const t = (speed-90)/20;
+    r=255; g=Math.round(220-t*180); b=0;
+    intensity = 0.45 + t * 0.15;
   } else {
-    // красный, яркий, нарастает 110→140
-    const t = Math.min((speed - 110) / 30, 1);
-    r = 255; g = Math.round(40 - t * 40); b = 0;
-    intensity = 0.65 + t * 0.25;  // 0.65 → 0.90
+    const t = Math.min((speed-110)/30, 1);
+    r=255; g=Math.round(40-t*40); b=0;
+    intensity = 0.60 + t * 0.25;
   }
-
   if (intensity <= 0.01) return;
 
-  const color = `${r},${g},${b}`;
+  const col = `${r},${g},${b}`;
 
-  // слой 1 — широкий мягкий ореол (весь диск)
-  const g1 = ctx.createRadialGradient(CX, CY, 0, CX, CY, R * 0.95);
-  g1.addColorStop(0,    `rgba(${color},${(intensity * 0.9).toFixed(2)})`);
-  g1.addColorStop(0.45, `rgba(${color},${(intensity * 0.4).toFixed(2)})`);
-  g1.addColorStop(1,    `rgba(${color},0)`);
-  ctx.beginPath();
-  ctx.arc(CX, CY, R * 0.95, 0, Math.PI * 2);
-  ctx.fillStyle = g1;
-  ctx.fill();
+  // широкий ореол от центра
+  const g1 = ctx2.createRadialGradient(CX, CY, 0, CX, CY, CLOCK_R * 0.92);
+  g1.addColorStop(0,    `rgba(${col},${(intensity * 0.85).toFixed(2)})`);
+  g1.addColorStop(0.45, `rgba(${col},${(intensity * 0.35).toFixed(2)})`);
+  g1.addColorStop(1,    `rgba(${col},0)`);
+  ctx2.beginPath(); ctx2.arc(CX, CY, CLOCK_R * 0.92, 0, Math.PI*2);
+  ctx2.fillStyle = g1; ctx2.fill();
 
-  // слой 2 — концентрированное свечение в центре
-  const g2 = ctx.createRadialGradient(CX, CY, 0, CX, CY, R * 0.38);
-  g2.addColorStop(0,   `rgba(${color},${(intensity * 0.55).toFixed(2)})`);
-  g2.addColorStop(0.6, `rgba(${color},${(intensity * 0.15).toFixed(2)})`);
-  g2.addColorStop(1,   `rgba(${color},0)`);
-  ctx.beginPath();
-  ctx.arc(CX, CY, R * 0.38, 0, Math.PI * 2);
-  ctx.fillStyle = g2;
-  ctx.fill();
-
-  // слой 3 — свечение по ободу (пульс на высоких скоростях)
+  // пульс по ободу спидометра при высокой скорости
   if (speed > 90) {
     const pulse = speed > 110 ? 0.5 + 0.5 * Math.sin(Date.now() / 180) : 1;
-    const rimAlpha = ((intensity - 0.5) * pulse * 0.6).toFixed(2);
-    const g3 = ctx.createRadialGradient(CX, CY, R * 0.72, CX, CY, R * 1.0);
-    g3.addColorStop(0,   `rgba(${color},0)`);
-    g3.addColorStop(0.6, `rgba(${color},${rimAlpha})`);
-    g3.addColorStop(1,   `rgba(${color},0)`);
-    ctx.beginPath();
-    ctx.arc(CX, CY, R, 0, Math.PI * 2);
-    ctx.fillStyle = g3;
-    ctx.fill();
+    const rimA  = ((intensity - 0.4) * pulse * 0.7).toFixed(2);
+    const g2 = ctx2.createRadialGradient(CX, CY, SPD_R_IN, CX, CY, SPD_R_OUT);
+    g2.addColorStop(0, `rgba(${col},0)`);
+    g2.addColorStop(0.5, `rgba(${col},${rimA})`);
+    g2.addColorStop(1, `rgba(${col},0)`);
+    ctx2.beginPath(); ctx2.arc(CX, CY, SPD_R_OUT, 0, Math.PI*2);
+    ctx2.fillStyle = g2; ctx2.fill();
   }
 }
 
-// ─── объёмная стрелка ─────────────────────────────────────────────────────────
-function drawNeedle(ctx, angle) {
-  const NL = R - 48;   // длина
-  const NW = 7;        // полуширина у основания
+// ── Окошко скорости + секундная стрелка — поверх всего ─────────
+function drawSpeedWindow() {
+  const ctx2 = speedWinCtx;
+  ctx2.clearRect(0, 0, SIZE, SIZE);
+
+  // ── секундная стрелка (поверх часов, центр скрыт окошком) ──
+  const now2    = new Date();
+  const secFrac = now2.getSeconds() + now2.getMilliseconds() / 1000;
+  const secAngle = (secFrac / 60) * Math.PI * 2 - Math.PI / 2;
+  const R2 = CLOCK_R;
+
+  // хвост
+  ctx2.beginPath();
+  ctx2.moveTo(CX, CY);
+  ctx2.lineTo(CX + Math.cos(secAngle + Math.PI) * R2 * 0.22,
+              CY + Math.sin(secAngle + Math.PI) * R2 * 0.22);
+  ctx2.lineWidth = 1.8; ctx2.strokeStyle = 'rgba(80,140,255,0.75)';
+  ctx2.lineCap = 'round';
+  ctx2.shadowColor = 'rgba(80,140,255,0.5)'; ctx2.shadowBlur = 6;
+  ctx2.stroke(); ctx2.shadowBlur = 0;
+
+  // тело
+  ctx2.beginPath();
+  ctx2.moveTo(CX, CY);
+  ctx2.lineTo(CX + Math.cos(secAngle) * R2 * 0.88,
+              CY + Math.sin(secAngle) * R2 * 0.88);
+  ctx2.lineWidth = 1.5; ctx2.strokeStyle = 'rgba(100,165,255,0.95)';
+  ctx2.lineCap = 'round';
+  ctx2.shadowColor = 'rgba(100,165,255,0.7)'; ctx2.shadowBlur = 8;
+  ctx2.stroke(); ctx2.shadowBlur = 0;
+
+  const WIN_R = CLOCK_R * 0.26;
+  // фон
+  const winBg = ctx2.createRadialGradient(CX, CY - WIN_R*0.2, WIN_R*0.1, CX, CY, WIN_R);
+  winBg.addColorStop(0, '#05101e');
+  winBg.addColorStop(1, '#020810');
+  ctx2.beginPath(); ctx2.arc(CX, CY, WIN_R, 0, Math.PI*2);
+  ctx2.fillStyle = winBg; ctx2.fill();
+  // внешнее кольцо
+  ctx2.save();
+  ctx2.beginPath(); ctx2.arc(CX, CY, WIN_R, 0, Math.PI*2);
+  ctx2.strokeStyle = 'rgba(29,224,255,0.65)'; ctx2.lineWidth = 2.5;
+  ctx2.shadowColor = '#29e0ff'; ctx2.shadowBlur = 14;
+  ctx2.stroke(); ctx2.shadowBlur = 0;
+  ctx2.restore();
+  // тонкое внутреннее кольцо
+  ctx2.beginPath(); ctx2.arc(CX, CY, WIN_R - 4, 0, Math.PI*2);
+  ctx2.strokeStyle = 'rgba(29,224,255,0.18)'; ctx2.lineWidth = 0.8; ctx2.stroke();
+  // цифра
+  const spdVal = Math.round(spdCurrent);
+  const spdFs  = Math.max(Math.round(WIN_R * 0.85), 16);
+  ctx2.save();
+  ctx2.shadowColor = 'rgba(41,224,255,0.75)'; ctx2.shadowBlur = 16;
+  ctx2.fillStyle = '#7df3ff';
+  ctx2.font = `700 ${spdFs}px Segoe UI, Arial, sans-serif`;
+  ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
+  ctx2.fillText(spdVal, CX, CY - WIN_R * 0.10);
+  ctx2.restore();
+  ctx2.fillStyle = 'rgba(95,239,255,0.50)';
+  ctx2.font = `400 ${Math.round(spdFs * 0.32)}px Segoe UI, Arial, sans-serif`;
+  ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
+  ctx2.fillText('км/ч', CX, CY + WIN_R * 0.46);
+  // блик стекла
+  const glassG = ctx2.createRadialGradient(CX - WIN_R*0.3, CY - WIN_R*0.4, 0, CX, CY, WIN_R);
+  glassG.addColorStop(0, 'rgba(255,255,255,0.12)');
+  glassG.addColorStop(0.5, 'rgba(255,255,255,0.02)');
+  glassG.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx2.beginPath(); ctx2.arc(CX, CY, WIN_R, 0, Math.PI*2);
+  ctx2.fillStyle = glassG; ctx2.fill();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  ЧАСЫ
+// ════════════════════════════════════════════════════════════════
+function drawDial() {
+  ctx.clearRect(0, 0, SIZE, SIZE);
+  const R = CLOCK_R;
+  const now = new Date();
+  const h = now.getHours() % 12;
+  const m = now.getMinutes();
+  const s = now.getSeconds();
+  const ms = now.getMilliseconds();
+
+  // Всё рисуем только внутри круга часов — кольцо спидометра остаётся нетронутым
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(CX, CY, R + 6, 0, Math.PI * 2);
+  ctx.clip();
+
+  // фон циферблата
+  const bgGrad = ctx.createRadialGradient(CX, CY, 0, CX, CY, R);
+  bgGrad.addColorStop(0,   '#050c1f');
+  bgGrad.addColorStop(0.6, '#03091a');
+  bgGrad.addColorStop(1,   '#010510');
+  ctx.beginPath(); ctx.arc(CX, CY, R, 0, Math.PI*2);
+  ctx.fillStyle = bgGrad; ctx.fill();
+
+  // свечение по ободу
+  const rimGrad = ctx.createRadialGradient(CX, CY, R*0.88, CX, CY, R);
+  rimGrad.addColorStop(0, 'transparent');
+  rimGrad.addColorStop(1, 'rgba(40,80,180,0.18)');
+  ctx.beginPath(); ctx.arc(CX, CY, R, 0, Math.PI*2);
+  ctx.fillStyle = rimGrad; ctx.fill();
+
+  // тонкое кольцо
+  ctx.beginPath(); ctx.arc(CX, CY, R, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(60,100,200,0.2)'; ctx.lineWidth = 0.8; ctx.stroke();
+
+  // надпись ВЛАДИМИР — вверху циферблата
+  ctx.save();
+  const nameFontSize = Math.max(Math.round(R * 0.085), 8);
+  ctx.font = `100 ${nameFontSize}px -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif`;
+  ctx.fillStyle = 'rgba(160,195,255,0.28)';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const name = 'В Л А Д И М И Р';
+  ctx.fillText(name, CX, CY - R * 0.68);
+  ctx.restore();
+
+  // светящийся обод часов (два кольца)
+  ctx.save();
+  ctx.beginPath(); ctx.arc(CX, CY, R + 1, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(30,80,200,0.55)'; ctx.lineWidth = 2;
+  ctx.shadowColor = 'rgba(70,140,255,0.9)'; ctx.shadowBlur = 14;
+  ctx.stroke(); ctx.shadowBlur = 0;
+  ctx.beginPath(); ctx.arc(CX, CY, R + 4, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(110,185,255,0.45)'; ctx.lineWidth = 1;
+  ctx.shadowColor = 'rgba(120,200,255,0.6)'; ctx.shadowBlur = 8;
+  ctx.stroke(); ctx.shadowBlur = 0;
+  ctx.restore();
+
+  // деления (60 штук)
+  for (let i = 0; i < 60; i++) {
+    const angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+    const isMain = (i % 15 === 0);
+    const isHour = (i % 5 === 0);
+    let tickLen, lw, color, cap;
+    if (isMain)      { tickLen=R*0.105; lw=3.8; color='rgba(95,165,255,1)'; cap='round'; }
+    else if (isHour) { tickLen=R*0.075; lw=2.0; color='rgba(75,135,255,0.85)'; cap='round'; }
+    else             { tickLen=R*0.035; lw=0.9; color='rgba(60,115,215,0.5)'; cap='butt'; }
+    const outerT = R - 4, innerT = outerT - tickLen;
+    ctx.beginPath();
+    ctx.moveTo(CX + Math.cos(angle)*outerT, CY + Math.sin(angle)*outerT);
+    ctx.lineTo(CX + Math.cos(angle)*innerT, CY + Math.sin(angle)*innerT);
+    ctx.lineWidth = lw; ctx.strokeStyle = color; ctx.lineCap = cap;
+    if (isMain) { ctx.shadowColor='rgba(80,150,255,0.85)'; ctx.shadowBlur=7; }
+    ctx.stroke(); ctx.shadowBlur = 0;
+  }
+
+  // плавные углы
+  const secFrac  = s + ms / 1000;
+  const minFrac  = m + secFrac / 60;
+  const hourFrac = h + minFrac / 60;
+  const secAngle  = (secFrac  / 60) * Math.PI * 2 - Math.PI / 2;
+  const minAngle  = (minFrac  / 60) * Math.PI * 2 - Math.PI / 2;
+  const hourAngle = (hourFrac / 12) * Math.PI * 2 - Math.PI / 2;
+
+  // суб-циферблаты — внизу
+  const DAYS_SHORT   = ['ПН','ВТ','СР','ЧТ','ПТ','СБ','ВС'];
+  const MONTHS_SHORT = ['ЯНВ','ФЕВ','МАР','АПР','МАЙ','ИЮН','ИЮЛ','АВГ','СЕН','ОКТ','НОЯ','ДЕК'];
+  const dayJS = now.getDay();
+  const dayIdx = dayJS === 0 ? 6 : dayJS - 1;
+  const subR   = R * 0.230;  // было 0.200, +15%
+  const subCY  = CY + R * 0.58;
+  drawSubDial(CX - R*0.40, subCY, 7,  dayIdx,          DAYS_SHORT[dayIdx]);
+  drawSubDial(CX + R*0.40, subCY, 12, now.getMonth(),  MONTHS_SHORT[now.getMonth()]);
+
+  // стрелки часов/минут — длинные
+  drawHand(hourAngle, R*0.68, R*0.10, 6.5, 0.8, 'rgba(200,215,255,0.95)');
+  drawHand(minAngle,  R*0.88, R*0.12, 4.5, 0.5, 'rgba(200,215,255,0.88)');
+
+  // секундный шлейф + стрелка — обрезаем по окошку
+  ctx.save();
+  const WIN_R_SEC = CLOCK_R * 0.26 + 2;
+  ctx.beginPath();
+  ctx.arc(CX, CY, CLOCK_R + 10, 0, Math.PI*2, false);
+  ctx.arc(CX, CY, WIN_R_SEC, 0, Math.PI*2, true);
+  ctx.clip();
+
+  // секундный шлейф
+  const tipR = R * 0.88, tailR = R * 0.18;
+  const TRAIL_SPAN = (15/60) * Math.PI * 2;
+  const TRAIL_STEPS = 48;
+  for (let i = 0; i < TRAIL_STEPS; i++) {
+    const f0=i/TRAIL_STEPS, f1=(i+1)/TRAIL_STEPS;
+    const a0=secAngle-f0*TRAIL_SPAN, a1=secAngle-f1*TRAIL_SPAN;
+    const l0=1-f0, l1=1-f1;
+    const tx0=CX+Math.cos(a0)*tipR, ty0=CY+Math.sin(a0)*tipR;
+    const tx1=CX+Math.cos(a1)*tipR, ty1=CY+Math.sin(a1)*tipR;
+    const bx0=CX-Math.cos(a0)*tailR, by0=CY-Math.sin(a0)*tailR;
+    const bx1=CX-Math.cos(a1)*tailR, by1=CY-Math.sin(a1)*tailR;
+    ctx.beginPath();
+    ctx.moveTo(bx0,by0); ctx.lineTo(tx0,ty0);
+    ctx.lineTo(tx1,ty1); ctx.lineTo(bx1,by1);
+    ctx.closePath();
+    const alpha = Math.pow((l0+l1)/2, 1.7) * 0.42;
+    ctx.fillStyle = `rgba(90,150,255,${alpha})`; ctx.fill();
+  }
+
+  ctx.restore();
+
+  // секундная стрелка вынесена на верхний canvas (speedWin)
+
+  // ── круглое окошко скорости рисуется на слое speedFg поверх стрелки спидометра ──
+
+  // цифра текущего часа на ободе
+  const totalMin = now.getHours()*60 + now.getMinutes();
+  const nearestHour = Math.round(totalMin/60) % 12 || 12;
+  const tickIndex = nearestHour % 12;
+  const tickAngle = (tickIndex/12) * Math.PI*2 - Math.PI/2;
+  const labelDist = R - R*0.07;
+  const lx = CX + Math.cos(tickAngle)*labelDist;
+  const ly = CY + Math.sin(tickAngle)*labelDist;
+  const fontSize = Math.round(R * 0.13);
+  ctx.save();
+  ctx.beginPath(); ctx.arc(lx, ly, fontSize*0.95, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(3,7,22,0.85)'; ctx.fill();
+  ctx.font = `100 ${fontSize}px -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif`;
+  ctx.fillStyle = 'rgba(210,225,255,0.90)';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(nearestHour), lx, ly);
+  ctx.restore();
+
+  // окошко даты на 3 часа — в рамке
+  const dateNum = now.getDate();
+  const dfs = Math.max(Math.round(R*0.115), 10);
+  const winW = dfs * 2.4, winH = dfs * 1.7, rad = 4;
+  const winX = CX + R*0.68 - winW/2, winY = CY - winH/2;
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y);
+    ctx.arcTo(x+w, y,   x+w, y+r,   r);
+    ctx.lineTo(x+w, y+h-r);
+    ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+    ctx.lineTo(x+r, y+h);
+    ctx.arcTo(x,   y+h, x,   y+h-r, r);
+    ctx.lineTo(x,   y+r);
+    ctx.arcTo(x,   y,   x+r, y,     r);
+    ctx.closePath();
+  }
 
   ctx.save();
-  ctx.translate(CX, CY);
-  ctx.rotate(angle);
-
-  // тень/глоу
-  ctx.shadowColor = '#29e0ff'; ctx.shadowBlur = 18;
-
-  // основное тело (трапеция)
-  ctx.beginPath();
-  ctx.moveTo(-NL * 0.18,  NW);
-  ctx.lineTo( NL * 0.78,  3);
-  ctx.lineTo( NL,          0);
-  ctx.lineTo( NL * 0.78, -3);
-  ctx.lineTo(-NL * 0.18, -NW);
-  ctx.closePath();
-
-  const nGrad = ctx.createLinearGradient(0, 0, NL, 0);
-  nGrad.addColorStop(0,    '#062732');
-  nGrad.addColorStop(0.35, '#1390b4');
-  nGrad.addColorStop(0.75, '#29e0ff');
-  nGrad.addColorStop(1,    '#9ef6ff');
-  ctx.fillStyle = nGrad;
-  ctx.fill();
-
-  // светлая полоска-блик (верхняя часть)
-  ctx.beginPath();
-  ctx.moveTo(-NL * 0.10, -NW + 2);
-  ctx.lineTo( NL * 0.80, -1.5);
-  ctx.lineTo( NL,          0);
-  ctx.lineTo(-NL * 0.10, -1);
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(200,248,255,0.28)';
+  // свечение рамки
+  ctx.shadowColor = 'rgba(60,120,255,0.6)'; ctx.shadowBlur = 10;
+  roundRect(winX, winY, winW, winH, rad);
+  ctx.fillStyle = '#000510'; ctx.fill();
   ctx.shadowBlur = 0;
-  ctx.fill();
+  // внешняя синяя рамка
+  roundRect(winX, winY, winW, winH, rad);
+  ctx.strokeStyle = 'rgba(70,130,255,0.95)'; ctx.lineWidth = 1.6; ctx.stroke();
+  // тонкая внутренняя рамка
+  roundRect(winX+2.5, winY+2.5, winW-5, winH-5, rad-1);
+  ctx.strokeStyle = 'rgba(90,150,255,0.30)'; ctx.lineWidth = 0.6; ctx.stroke();
+  // цифра — белая, лёгкий шрифт
+  ctx.font = `300 ${dfs}px -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif`;
+  ctx.fillStyle = 'rgba(220,232,255,0.95)';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(dateNum), winX+winW/2, winY+winH/2+0.5);
+  ctx.restore();
 
-  // тёмная нижняя тень (даёт объём)
-  ctx.beginPath();
-  ctx.moveTo(-NL * 0.18,  NW);
-  ctx.lineTo( NL * 0.78,  3);
-  ctx.lineTo(-NL * 0.10,  1);
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.fill();
+  // закрываем clip всего циферблата
+  ctx.restore();
+}
 
-  // противовес (хвост)
+// ── Стрелки часов ──────────────────────────────────────────────
+// Рисуем только ту часть стрелки которая СНАРУЖИ окошка скорости
+function drawHand(angle, length, tailLen, baseWidth, tipWidth, color) {
+  const WIN_R = CLOCK_R * 0.26 + 2; // радиус окошка + небольшой зазор
+  const cos=Math.cos(angle), sin=Math.sin(angle);
+  const perp=angle+Math.PI/2, pc=Math.cos(perp), ps=Math.sin(perp);
+  const tx=CX+cos*length, ty=CY+sin*length;
+  const bx=CX-cos*tailLen, by=CY-sin*tailLen;
+  const wax=CX+cos*length*0.15, way=CY+sin*length*0.15;
+
+  ctx.save();
+
+  // clip: всё пространство циферблата МИНУС круг окошка
   ctx.beginPath();
-  ctx.moveTo(-NL * 0.18,  NW * 0.7);
-  ctx.lineTo(-NL * 0.28,  0);
-  ctx.lineTo(-NL * 0.18, -NW * 0.7);
+  ctx.arc(CX, CY, CLOCK_R + 10, 0, Math.PI * 2, false); // внешний контур (по часовой)
+  ctx.arc(CX, CY, WIN_R, 0, Math.PI * 2, true);          // вычитаем окошко (против часовой)
+  ctx.clip();
+
+  ctx.beginPath();
+  ctx.moveTo(bx+pc*tipWidth*0.5, by+ps*tipWidth*0.5);
+  ctx.lineTo(bx-pc*tipWidth*0.5, by-ps*tipWidth*0.5);
+  ctx.lineTo(wax-pc*baseWidth, way-ps*baseWidth);
+  ctx.lineTo(tx+pc*tipWidth*0.3, ty+ps*tipWidth*0.3);
+  ctx.lineTo(tx-pc*tipWidth*0.3, ty-ps*tipWidth*0.3);
+  ctx.lineTo(wax+pc*baseWidth, way+ps*baseWidth);
   ctx.closePath();
-  ctx.fillStyle = '#0a2d3c';
-  ctx.shadowBlur = 0;
-  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.shadowColor = 'rgba(160,190,255,0.25)'; ctx.shadowBlur = 6;
+  ctx.fill(); ctx.shadowBlur = 0;
 
   ctx.restore();
 }
 
-// ─── центральный металлический узел ──────────────────────────────────────────
-function drawHub(ctx) {
-  // внешнее кольцо
-  const hubG = ctx.createRadialGradient(CX - 4, CY - 4, 1, CX, CY, 18);
-  hubG.addColorStop(0,   '#3a7a94');
-  hubG.addColorStop(0.5, '#0e2a36');
-  hubG.addColorStop(1,   '#050e14');
-  ctx.beginPath();
-  ctx.arc(CX, CY, 18, 0, Math.PI * 2);
-  ctx.fillStyle = hubG; ctx.fill();
+// ── Суб-циферблат ──────────────────────────────────────────────
+function drawSubDial(scx, scy, divisions, activeIdx, centerLabel) {
+  const subR = CLOCK_R * 0.230;  // +15% от исходного 0.200
+  ctx.save();
+  const sbg = ctx.createRadialGradient(scx, scy-subR*0.15, 0, scx, scy, subR);
+  sbg.addColorStop(0,'#1a1e2a'); sbg.addColorStop(0.5,'#0d1018'); sbg.addColorStop(1,'#060810');
+  ctx.beginPath(); ctx.arc(scx,scy,subR,0,Math.PI*2); ctx.fillStyle=sbg; ctx.fill();
 
-  ctx.beginPath();
-  ctx.arc(CX, CY, 18, 0, Math.PI * 2);
-  ctx.strokeStyle = '#29e0ff'; ctx.lineWidth = 2.5;
-  ctx.shadowColor = '#29e0ff'; ctx.shadowBlur = 10;
-  ctx.stroke(); ctx.shadowBlur = 0;
+  // обод
+  ctx.save();
+  ctx.beginPath(); ctx.arc(scx,scy,subR+3,0,Math.PI*2);
+  ctx.strokeStyle='rgba(80,150,255,0.4)'; ctx.lineWidth=1;
+  ctx.shadowColor='rgba(90,160,255,0.7)'; ctx.shadowBlur=8;
+  ctx.stroke(); ctx.shadowBlur=0; ctx.restore();
+  ctx.beginPath(); ctx.arc(scx,scy,subR,0,Math.PI*2);
+  ctx.strokeStyle='rgba(10,15,30,0.9)'; ctx.lineWidth=2; ctx.stroke();
+  ctx.beginPath(); ctx.arc(scx,scy,subR-1,0,Math.PI*2);
+  ctx.strokeStyle='rgba(60,120,255,0.55)'; ctx.lineWidth=0.8;
+  ctx.shadowColor='rgba(70,140,255,0.6)'; ctx.shadowBlur=5;
+  ctx.stroke(); ctx.shadowBlur=0;
 
-  // блик на втулке
-  ctx.beginPath();
-  ctx.arc(CX - 5, CY - 5, 5, 0, Math.PI * 2);
-  const hG2 = ctx.createRadialGradient(CX - 6, CY - 6, 0, CX - 5, CY - 5, 5);
-  hG2.addColorStop(0,   'rgba(200,248,255,0.55)');
-  hG2.addColorStop(1,   'rgba(200,248,255,0)');
-  ctx.fillStyle = hG2; ctx.fill();
+  // деления суб-циферблата
+  const minorPerMajor = divisions===7 ? 3 : 4;
+  const totalTicks = divisions * minorPerMajor;
+  for (let i=0; i<totalTicks; i++) {
+    const ang=-Math.PI/2+(i/totalTicks)*Math.PI*2;
+    const isMajor=(i%minorPerMajor===0);
+    const isActive=isMajor&&(i/minorPerMajor===activeIdx);
+    const tickLen=isMajor?subR*0.22:subR*0.10;
+    const outer=subR-2, inner=outer-tickLen;
+    ctx.beginPath();
+    ctx.moveTo(scx+Math.cos(ang)*outer, scy+Math.sin(ang)*outer);
+    ctx.lineTo(scx+Math.cos(ang)*inner, scy+Math.sin(ang)*inner);
+    if (isActive)    { ctx.strokeStyle='rgba(220,235,255,0.95)'; ctx.lineWidth=1.6; }
+    else if (isMajor){ ctx.strokeStyle='rgba(140,160,210,0.60)'; ctx.lineWidth=1.1; }
+    else             { ctx.strokeStyle='rgba(80,100,160,0.30)';  ctx.lineWidth=0.5; }
+    ctx.stroke();
+  }
 
-  // центральная точка
+  // стрелка суб-циферблата
+  const needleAng=-Math.PI/2+(activeIdx/divisions)*Math.PI*2;
+  const needleLen=subR*0.68, tailLen=subR*0.18;
+  const cos=Math.cos(needleAng), sin=Math.sin(needleAng);
+  const perp=needleAng+Math.PI/2, pc=Math.cos(perp), ps=Math.sin(perp);
+  const bw=1.4;
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.7)'; ctx.shadowBlur=4;
   ctx.beginPath();
-  ctx.arc(CX, CY, 4, 0, Math.PI * 2);
-  ctx.fillStyle = '#7df3ff'; ctx.fill();
+  ctx.moveTo(scx-cos*tailLen+pc*bw*0.5, scy-sin*tailLen+ps*bw*0.5);
+  ctx.lineTo(scx-cos*tailLen-pc*bw*0.5, scy-sin*tailLen-ps*bw*0.5);
+  ctx.lineTo(scx+cos*needleLen*0.15-pc*bw, scy+sin*needleLen*0.15-ps*bw);
+  ctx.lineTo(scx+cos*needleLen, scy+sin*needleLen);
+  ctx.lineTo(scx+cos*needleLen*0.15+pc*bw, scy+sin*needleLen*0.15+ps*bw);
+  ctx.closePath();
+  const ng=ctx.createLinearGradient(scx+pc*bw*2,scy+ps*bw*2,scx-pc*bw*2,scy-ps*bw*2);
+  ng.addColorStop(0,'rgba(220,230,255,0.98)'); ng.addColorStop(0.4,'rgba(160,175,210,0.90)');
+  ng.addColorStop(0.6,'rgba(200,215,250,0.95)'); ng.addColorStop(1,'rgba(120,135,180,0.80)');
+  ctx.fillStyle=ng; ctx.fill(); ctx.shadowBlur=0; ctx.restore();
+
+  // центральный винт
+  const scrG=ctx.createRadialGradient(scx-0.5,scy-0.5,0,scx,scy,subR*0.10);
+  scrG.addColorStop(0,'#d0d8f0'); scrG.addColorStop(0.5,'#808aa0'); scrG.addColorStop(1,'#2a2e3a');
+  ctx.beginPath(); ctx.arc(scx,scy,subR*0.10,0,Math.PI*2); ctx.fillStyle=scrG; ctx.fill();
+
+  // метка
+  const lf=Math.max(Math.round(subR*0.28),5);
+  ctx.font=`300 ${lf}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  ctx.fillStyle='rgba(180,200,255,0.55)';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(centerLabel, scx, scy+subR*0.42);
+
+  ctx.restore();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  АНИМАЦИЯ — физика
-// ═══════════════════════════════════════════════════════════════════════════════
-const STIFFNESS = 0.035;   // сила пружины
-const DAMPING   = 0.78;    // демпфирование
+// ════════════════════════════════════════════════════════════════
+//  ФИЗИКА СТРЕЛКИ СПИДОМЕТРА
+// ════════════════════════════════════════════════════════════════
+const STIFFNESS = 0.035, DAMPING = 0.78;
 
-function animate() {
-  const target = speedToAngle(targetValue);
+function animateSpeed() {
+  const target = spdToAngle(targetValue);
   const force  = (target - displayAngle) * STIFFNESS;
   velocity = (velocity + force) * DAMPING;
   displayAngle += velocity;
-
-  // синхронизируем currentValue для цифры
-  currentValue = angleToSpeed(displayAngle);
-
-  drawForeground();
-  requestAnimationFrame(animate);
+  spdCurrent = angleToSpd(displayAngle);
+  drawSpeedFg();
+  drawSpeedWindow();
+  requestAnimationFrame(animateSpeed);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  SWEEP АНИМАЦИЯ при запуске
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════
+//  SWEEP
+// ════════════════════════════════════════════════════════════════
 function runSweep() {
-  // 0 → 140 → 0 за ~1.8с, затем в текущее значение
-  let phase = 0; // 0 = разгон, 1 = торможение, 2 = готово
-  const sweepPeak = 140;
-  const sweepUp   = 900;   // мс на разгон
-  const sweepDown  = 900;
-
+  let phase = 0;
   const t0 = performance.now();
-  sweepDone = false;
-
   function tick(now) {
-    const elapsed = now - t0;
-    if (phase === 0) {
-      targetValue = (elapsed / sweepUp) * sweepPeak;
-      if (elapsed >= sweepUp) { phase = 1; }
-    } else if (phase === 1) {
-      const t1 = elapsed - sweepUp;
-      targetValue = sweepPeak * (1 - t1 / sweepDown);
-      if (elapsed >= sweepUp + sweepDown) {
-        targetValue = 0;
-        phase = 2;
-        sweepDone = true;
-        return;
-      }
+    const e = now - t0;
+    if (phase===0) { targetValue=(e/900)*140; if(e>=900) phase=1; }
+    else if (phase===1) {
+      targetValue=140*(1-(e-900)/900);
+      if(e>=1800){ targetValue=0; return; }
     }
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════
 //  GPS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════
 const gpsBtn = document.getElementById('gpsBtn');
 
 function startGPS() {
-  gpsActive = true;
-  gpsBtn.classList.add('active');
+  gpsActive = true; gpsBtn.classList.add('active');
   if (!('geolocation' in navigator)) return;
   watchId = navigator.geolocation.watchPosition(
     pos => {
       const s = pos.coords.speed;
-      if (s === null || isNaN(s)) return;
-      targetValue = Math.min(Math.max(s * 3.6, 0), MAX_SPEED);
+      if (s===null||isNaN(s)) return;
+      targetValue = Math.min(Math.max(s*3.6,0), MAX_SPEED);
     },
     () => stopGPS(),
-    { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+    { enableHighAccuracy:true, maximumAge:1000, timeout:10000 }
   );
 }
-
 function stopGPS() {
-  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-  gpsActive = false;
-  gpsBtn.classList.remove('active');
-  targetValue = 0;
+  if (watchId!==null) { navigator.geolocation.clearWatch(watchId); watchId=null; }
+  gpsActive=false; gpsBtn.classList.remove('active'); targetValue=0;
 }
-
 gpsBtn.addEventListener('click', () => gpsActive ? stopGPS() : startGPS());
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  СТАРТ
-// ═══════════════════════════════════════════════════════════════════════════════
-drawBackground();
-animate();
-setTimeout(runSweep, 200);
-</script>
+// ════════════════════════════════════════════════════════════════
+//  WAKE LOCK — надёжный, не даёт экрану гаснуть
+// ════════════════════════════════════════════════════════════════
+let wakeLockSentinel = null;
 
+async function keepAwake() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request('screen');
+    wakeLockSentinel.addEventListener('release', () => {
+      // Если блокировка снята системой — переподключаемся
+      setTimeout(keepAwake, 1000);
+    });
+  } catch(e) {
+    // Повторяем через 5 сек при ошибке (например экран был уже выключен)
+    setTimeout(keepAwake, 5000);
+  }
+}
+
+keepAwake();
+
+// Переподключаем при возврате на вкладку/приложение
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') keepAwake();
+});
+
+// Переподключаем при любом касании (iOS Safari иногда требует жест)
+document.addEventListener('touchstart', () => {
+  if (!wakeLockSentinel || wakeLockSentinel.released) keepAwake();
+}, { passive: true });
+
+// Убираем класс dimmed полностью — экран не гаснет никогда
+document.body.classList.remove('dimmed');
+
+// ════════════════════════════════════════════════════════════════
+//  СТАРТ
+// ════════════════════════════════════════════════════════════════
+drawSpeedBg();
+
+// часы — обычный loop
+function clockLoop() { drawDial(); requestAnimationFrame(clockLoop); }
+clockLoop();
+
+// спидометр
+animateSpeed();
+setTimeout(runSweep, 300);
+setTimeout(positionAlarm, 400);
+
+}); // end DOMContentLoaded
+</script>
 </body>
 </html>
