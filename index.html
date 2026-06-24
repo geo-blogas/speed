@@ -455,9 +455,6 @@ function drawSpeedFg() {
   const R_MID    = (SPD_R_OUT + SPD_R_IN) / 2;
   const TRACK    = SPD_R_OUT - SPD_R_IN;
 
-  // ── ореол зоны скорости (распространяется внутрь на циферблат) ──
-  drawAura(ctx2, speed);
-
   // ── активная дуга ──
   ctx2.save();
   ctx2.shadowColor = '#29e0ff'; ctx2.shadowBlur = 16;
@@ -631,6 +628,50 @@ function drawSpeedWindow() {
   const ctx2 = speedWinCtx;
   ctx2.clearRect(0, 0, SIZE, SIZE);
 
+  const speed = spdCurrent;
+
+  // ── вычисляем цвет зоны один раз — используем для ореола и цифры ──
+  let r, g, b, intensity;
+  if (speed <= 50) {
+    r=29; g=233; b=150;
+    intensity = (speed / 50) * 0.28;
+  } else if (speed <= 90) {
+    const t = (speed-50)/40;
+    r=Math.round(29+t*(255-29)); g=Math.round(233+t*(220-233)); b=Math.round(150+t*(0-150));
+    intensity = 0.28 + t * 0.17;
+  } else if (speed <= 110) {
+    const t = (speed-90)/20;
+    r=255; g=Math.round(220-t*180); b=0;
+    intensity = 0.45 + t * 0.15;
+  } else {
+    const t = Math.min((speed-110)/30, 1);
+    r=255; g=Math.round(40-t*40); b=0;
+    intensity = 0.60 + t * 0.25;
+  }
+  const col = `${r},${g},${b}`;
+
+  // ── ореол — широкий от центра на весь циферблат ──
+  if (intensity > 0.01) {
+    const g1 = ctx2.createRadialGradient(CX, CY, 0, CX, CY, CLOCK_R * 0.95);
+    g1.addColorStop(0,    `rgba(${col},${(intensity * 0.85).toFixed(2)})`);
+    g1.addColorStop(0.45, `rgba(${col},${(intensity * 0.35).toFixed(2)})`);
+    g1.addColorStop(1,    `rgba(${col},0)`);
+    ctx2.beginPath(); ctx2.arc(CX, CY, CLOCK_R * 0.95, 0, Math.PI*2);
+    ctx2.fillStyle = g1; ctx2.fill();
+
+    // пульс по ободу спидометра при высокой скорости
+    if (speed > 90) {
+      const pulse = speed > 110 ? 0.5 + 0.5 * Math.sin(Date.now() / 180) : 1;
+      const rimA  = ((intensity - 0.4) * pulse * 0.7).toFixed(2);
+      const g2 = ctx2.createRadialGradient(CX, CY, SPD_R_IN, CX, CY, SPD_R_OUT);
+      g2.addColorStop(0,   `rgba(${col},0)`);
+      g2.addColorStop(0.5, `rgba(${col},${rimA})`);
+      g2.addColorStop(1,   `rgba(${col},0)`);
+      ctx2.beginPath(); ctx2.arc(CX, CY, SPD_R_OUT, 0, Math.PI*2);
+      ctx2.fillStyle = g2; ctx2.fill();
+    }
+  }
+
   // ── секундная стрелка (поверх часов, центр скрыт окошком) ──
   const now2    = new Date();
   const secFrac = now2.getSeconds() + now2.getMilliseconds() / 1000;
@@ -674,17 +715,19 @@ function drawSpeedWindow() {
   // тонкое внутреннее кольцо
   ctx2.beginPath(); ctx2.arc(CX, CY, WIN_R - 4, 0, Math.PI*2);
   ctx2.strokeStyle = 'rgba(29,224,255,0.18)'; ctx2.lineWidth = 0.8; ctx2.stroke();
-  // цифра
-  const spdVal = Math.round(spdCurrent);
-  const spdFs  = Math.max(Math.round(WIN_R * 0.85), 16);
+  // цифра — цвет совпадает с зоной скорости
+  const spdVal  = Math.round(speed);
+  const spdFs   = Math.max(Math.round(WIN_R * 0.85), 16);
+  const digitColor = `rgba(${col},0.95)`;
+  const glowColor  = `rgba(${col},0.70)`;
   ctx2.save();
-  ctx2.shadowColor = 'rgba(41,224,255,0.75)'; ctx2.shadowBlur = 16;
-  ctx2.fillStyle = '#7df3ff';
+  ctx2.shadowColor = glowColor; ctx2.shadowBlur = 16;
+  ctx2.fillStyle = digitColor;
   ctx2.font = `700 ${spdFs}px Segoe UI, Arial, sans-serif`;
   ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
   ctx2.fillText(spdVal, CX, CY - WIN_R * 0.10);
   ctx2.restore();
-  ctx2.fillStyle = 'rgba(95,239,255,0.50)';
+  ctx2.fillStyle = `rgba(${col},0.50)`;
   ctx2.font = `400 ${Math.round(spdFs * 0.32)}px Segoe UI, Arial, sans-serif`;
   ctx2.textAlign = 'center'; ctx2.textBaseline = 'middle';
   ctx2.fillText('км/ч', CX, CY + WIN_R * 0.46);
